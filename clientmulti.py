@@ -19,9 +19,9 @@ CHAT_PORT = 9997
 
 VIDEO_WIDTH = 320
 VIDEO_HEIGHT = 240
-FPS_LIMIT = 50
-JPEG_QUALITY = 80
-AUDIO_RATE = 30000
+FPS_LIMIT = 20
+JPEG_QUALITY = 60
+AUDIO_RATE = 22050
 AUDIO_CHANNELS = 1
 AUDIO_CHUNK = 1024
 AUDIO_DTYPE = 'int16'
@@ -37,7 +37,7 @@ class App(ctk.CTk):
         self.title("SyncSpace Conference")
         self.geometry("1200x720")
         self.video_labels = {}
-        self.video_frames = {}
+        self.video_images = {} # To hold PhotoImage objects
         self.frames_lock = threading.Lock()
         self.client = None
 
@@ -126,19 +126,22 @@ class App(ctk.CTk):
 
     def update_video_grid(self):
         with self.frames_lock:
-            for username, frame in self.video_frames.items():
+            # Add new users
+            for username, image in self.video_images.items():
                 if username not in self.video_labels:
                     self.video_labels[username] = ctk.CTkLabel(self.video_frame, text="")
                     self.video_labels[username].pack(expand=True, fill="both", padx=5, pady=5)
 
-                img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-                img_tk = ImageTk.PhotoImage(image=img)
+                self.video_labels[username].configure(image=image)
+                self.video_labels[username].image = image
 
-                self.video_labels[username].configure(image=img_tk)
-                self.video_labels[username].image = img_tk
+            # Remove disconnected users
+            disconnected_users = set(self.video_labels.keys()) - set(self.video_images.keys())
+            for username in disconnected_users:
+                self.video_labels[username].pack_forget()
+                del self.video_labels[username]
 
         self.after(int(1000/FPS_LIMIT), self.update_video_grid)
-
 
 class AVClient:
     def __init__(self, server_host, username, app):
@@ -248,8 +251,11 @@ class AVClient:
             if not ret: continue
 
             frame_resized = cv2.resize(frame, (VIDEO_WIDTH, VIDEO_HEIGHT))
+            img = Image.fromarray(cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB))
+            img_tk = ImageTk.PhotoImage(image=img)
+
             with self.app.frames_lock:
-                self.app.video_frames[self.username] = frame_resized
+                self.app.video_images[self.username] = img_tk
 
             _, buffer = cv2.imencode('.jpg', frame_resized, [int(cv2.IMWRITE_JPEG_QUALITY), JPEG_QUALITY])
             data_to_send = pickle.dumps({'username': self.username, 'frame': buffer.tobytes()})
@@ -271,8 +277,10 @@ class AVClient:
                     frame_data = payload['frame']
                     frame = cv2.imdecode(np.frombuffer(frame_data, np.uint8), cv2.IMREAD_COLOR)
                     if frame is not None:
+                        img = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                        img_tk = ImageTk.PhotoImage(image=img)
                         with self.app.frames_lock:
-                            self.app.video_frames[username] = frame
+                            self.app.video_images[username] = img_tk
             except Exception as e:
                 print(f"Error receiving video: {e}")
                 break
