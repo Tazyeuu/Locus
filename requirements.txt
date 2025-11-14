@@ -1,0 +1,5 @@
+opencv-python
+sounddevice
+customtkinter
+Pillow
+numpy
