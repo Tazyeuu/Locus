@@ -338,10 +338,13 @@ class AVClient:
         try:
             print("Menghubungkan ke server audio...")
             self.audio_socket.connect((self.server_host, AUDIO_PORT))
+            self.send_data(self.audio_socket, self.client_id.encode('utf-8'))
             print("Menghubungkan ke server video...")
             self.video_socket.connect((self.server_host, VIDEO_PORT))
+            self.send_data(self.video_socket, self.client_id.encode('utf-8'))
             print("Menghubungkan ke server chat...")
             self.chat_socket.connect((self.server_host, CHAT_PORT))
+            self.send_data(self.chat_socket, self.client_id.encode('utf-8'))
         except Exception as e:
             print(f"❌ Gagal terhubung ke {self.server_host}: {e}")
             self.stop()
