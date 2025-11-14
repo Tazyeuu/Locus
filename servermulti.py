@@ -13,10 +13,8 @@ lock = threading.Lock()
 
 def broadcast(sender_id, data, data_type):
     with lock:
-        # Create a copy of the client items to avoid issues with dictionary size changing during iteration
-        for client_key, client_data in list(clients.items()):
-            # The sender_id is the unique ID of the client, not the IP
-            if client_data['id'] != sender_id and data_type in client_data['connections']:
+        for client_id, client_data in list(clients.items()):
+            if client_id != sender_id and data_type in client_data['connections']:
                 try:
                     client_data['connections'][data_type].sendall(data)
                 except (socket.error, BrokenPipeError):
@@ -24,29 +22,25 @@ def broadcast(sender_id, data, data_type):
                     client_data['connections'][data_type].close()
                     del client_data['connections'][data_type]
                     if not client_data['connections']:
-                        del clients[client_key]
+                        del clients[client_id]
 
 def handle_connection(client_socket, client_addr, data_type):
-    client_key = client_addr[0] # Group by IP address for now
-    client_id_to_broadcast = None
-
-    with lock:
-        if client_key not in clients:
-            # New client
-            client_id = str(uuid.uuid4())
-            clients[client_key] = {'id': client_id, 'connections': {}, 'addr': client_addr}
-            print(f"New client from {client_addr} assigned ID {client_id}")
-
-        clients[client_key]['connections'][data_type] = client_socket
-        client_id_to_broadcast = clients[client_key]['id']
-        print(f"Connection {data_type} received from {client_addr} for client ID {client_id_to_broadcast}")
-
-
     try:
+        # The first message from the client should be its unique ID
+        header = client_socket.recv(4)
+        if not header:
+            return
+        id_len = int.from_bytes(header, 'big')
+        client_id = client_socket.recv(id_len).decode('utf-8')
+
+        with lock:
+            if client_id not in clients:
+                clients[client_id] = {'connections': {}, 'addr': client_addr}
+            clients[client_id]['connections'][data_type] = client_socket
+
         while True:
             header = client_socket.recv(4)
             if not header:
-                print(f"Connection {data_type} from {client_addr} closed (empty header).")
                 break
             msg_len = int.from_bytes(header, 'big')
 
@@ -57,10 +51,9 @@ def handle_connection(client_socket, client_addr, data_type):
                     raise ConnectionResetError("Connection lost while receiving payload.")
                 data += packet
 
-            message_to_broadcast = pickle.dumps({'id': client_id_to_broadcast, 'data': data})
+            message_to_broadcast = client_id.encode('utf-8') + data
             broadcast_header = len(message_to_broadcast).to_bytes(4, 'big')
-
-            broadcast(client_id_to_broadcast, broadcast_header + message_to_broadcast, data_type)
+            broadcast(client_id, broadcast_header + message_to_broadcast, data_type)
 
     except (ConnectionResetError, ConnectionAbortedError):
         print(f"Connection {data_type} from {client_addr} forcibly closed.")
@@ -68,16 +61,13 @@ def handle_connection(client_socket, client_addr, data_type):
         print(f"Error on connection {data_type} from {client_addr}: {e}")
     finally:
         with lock:
-            if client_key in clients:
-                if data_type in clients[client_key]['connections']:
-                    clients[client_key]['connections'][data_type].close()
-                    del clients[client_key]['connections'][data_type]
+            if client_id in clients:
+                if data_type in clients[client_id]['connections']:
+                    clients[client_id]['connections'][data_type].close()
+                    del clients[client_id]['connections'][data_type]
 
-                # If no connections are left for this client, remove the client
-                if not clients[client_key]['connections']:
-                    print(f"All connections for client {clients[client_key]['id']} closed. Removing client.")
-                    del clients[client_key]
-        print(f"Connection {data_type} from {client_addr} closed. Remaining clients: {len(clients)}")
+                if not clients[client_id]['connections']:
+                    del clients[client_id]
 
 def start_listener(port, data_type):
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
