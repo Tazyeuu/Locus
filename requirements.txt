@@ -1,5 +1,4 @@
+PyQt6
 opencv-python
-sounddevice
-customtkinter
-Pillow
 numpy
+sounddevice
